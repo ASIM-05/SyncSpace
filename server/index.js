@@ -10,6 +10,12 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 io.on('connection', (socket) => {
   console.log('user connected:', socket.id);
+
+  socket.on('test-message', (data) => {
+    console.log('received:', data);
+    socket.broadcast.emit('test-message', data);
+  });
+
   socket.on('disconnect', () => console.log('user disconnected'));
 });
 
