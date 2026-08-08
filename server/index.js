@@ -16,6 +16,10 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('test-message', data);
   });
 
+  socket.on('draw-line', (lineData) => {
+    socket.broadcast.emit('draw-line', lineData);
+  });
+
   socket.on('disconnect', () => console.log('user disconnected'));
 });
 
