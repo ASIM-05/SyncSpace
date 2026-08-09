@@ -10,11 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "konva": "^10.3.0",
+    "monaco-editor": "^0.56.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-konva": "^19.2.5",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "y-monaco": "^0.1.6",
+    "y-websocket": "^3.1.0",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
