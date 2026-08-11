@@ -8,8 +8,12 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
+let drawHistory = [];
+
 io.on('connection', (socket) => {
   console.log('user connected:', socket.id);
+
+  socket.emit('draw-history', drawHistory);
 
   socket.on('test-message', (data) => {
     console.log('received:', data);
@@ -17,6 +21,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('draw-line', (lineData) => {
+    drawHistory.push(lineData);
     socket.broadcast.emit('draw-line', lineData);
   });
 
