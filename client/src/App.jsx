@@ -18,6 +18,9 @@ function App() {
 
   useEffect(() => {
     socket.on('connect', () => setConnected(true));
+    socket.on('draw-history', (history) => {
+      setLines(history);
+    });
     socket.on('draw-line', (lineData) => {
       setLines((prev) => [...prev, lineData]);
     });
