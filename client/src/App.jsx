@@ -4,31 +4,47 @@ import { Stage, Layer, Line } from 'react-konva';
 import Editor from '@monaco-editor/react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import './App.css';
 
 const socket = io('http://localhost:4000');
 
 function App() {
   const [lines, setLines] = useState([]);
   const [connected, setConnected] = useState(false);
-  const [code, setCode] = useState('// Start typing — open a second tab to see it sync live');
+  const [code, setCode] = useState(
+    '// Welcome to SyncSpace 🚀\n// Write code here and collaborate live.\n\nfunction helloTeam() {\n  return "Building together!";\n}'
+  );
+
   const isDrawing = useRef(false);
-  const ydocRef = useRef(null);
+  const linesRef = useRef([]);
   const ytextRef = useRef(null);
-  const isLocalChange = useRef(false);
+  const isRemoteChange = useRef(false);
 
   useEffect(() => {
     socket.on('connect', () => setConnected(true));
+    socket.on('disconnect', () => setConnected(false));
+
     socket.on('draw-history', (history) => {
       setLines(history);
+      linesRef.current = history;
     });
+
     socket.on('draw-line', (lineData) => {
-      setLines((prev) => [...prev, lineData]);
+      setLines((prev) => {
+        const updated = [...prev, lineData];
+        linesRef.current = updated;
+        return updated;
+      });
     });
 
     const ydoc = new Y.Doc();
-    const provider = new WebsocketProvider('ws://localhost:1234', 'syncspace-room', ydoc);
+    const provider = new WebsocketProvider(
+      'ws://localhost:1234',
+      'syncspace-room',
+      ydoc
+    );
+
     const ytext = ydoc.getText('monaco');
-    ydocRef.current = ydoc;
     ytextRef.current = ytext;
 
     if (ytext.toString() === '') {
@@ -38,25 +54,37 @@ function App() {
     }
 
     ytext.observe(() => {
-      isLocalChange.current = true;
+      isRemoteChange.current = true;
       setCode(ytext.toString());
     });
 
     return () => {
-      socket.off('draw-line');
       socket.off('connect');
+      socket.off('disconnect');
+      socket.off('draw-history');
+      socket.off('draw-line');
       provider.destroy();
       ydoc.destroy();
     };
   }, []);
 
-  const handleEditorChange = (value) => {
-    if (isLocalChange.current) {
-      isLocalChange.current = false;
+  const updateLines = (updater) => {
+    setLines((prev) => {
+      const updated = updater(prev);
+      linesRef.current = updated;
+      return updated;
+    });
+  };
+
+  const handleEditorChange = (value = '') => {
+    if (isRemoteChange.current) {
+      isRemoteChange.current = false;
       return;
     }
+
     const ytext = ytextRef.current;
     if (!ytext) return;
+
     ytext.doc.transact(() => {
       ytext.delete(0, ytext.length);
       ytext.insert(0, value);
@@ -66,81 +94,163 @@ function App() {
   const handleMouseDown = (e) => {
     isDrawing.current = true;
     const pos = e.target.getStage().getPointerPosition();
-    setLines((prev) => [...prev, { points: [pos.x, pos.y] }]);
+    updateLines((prev) => [...prev, { points: [pos.x, pos.y] }]);
   };
 
   const handleMouseMove = (e) => {
     if (!isDrawing.current) return;
+
     const point = e.target.getStage().getPointerPosition();
-    setLines((prev) => {
-      const lastLine = prev[prev.length - 1];
-      const updatedLine = { ...lastLine, points: [...lastLine.points, point.x, point.y] };
-      return [...prev.slice(0, -1), updatedLine];
+    updateLines((prev) => {
+      const last = prev[prev.length - 1];
+      const updated = {
+        ...last,
+        points: [...last.points, point.x, point.y],
+      };
+      return [...prev.slice(0, -1), updated];
     });
   };
 
   const handleMouseUp = () => {
     if (!isDrawing.current) return;
     isDrawing.current = false;
-    const lastLine = lines[lines.length - 1];
-    socket.emit('draw-line', lastLine);
+    socket.emit('draw-line', linesRef.current[linesRef.current.length - 1]);
+  };
+
+  const clearBoard = () => {
+    setLines([]);
+    linesRef.current = [];
   };
 
   return (
-    <div style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>SyncSpace</h1>
-        <div style={styles.status}>
-          <span style={{ ...styles.dot, background: connected ? '#22c55e' : '#ef4444' }} />
-          {connected ? 'Live Session Connected' : 'Connecting...'}
-        </div>
-      </div>
-      <p style={styles.subtitle}>Whiteboard + Code Editor — both sync live across sessions</p>
-
-      <div style={styles.splitView}>
-        <div style={styles.panel}>
-          <h3 style={styles.panelTitle}>Whiteboard</h3>
-          <Stage
-            width={400}
-            height={450}
-            onMouseDown={handleMouseDown}
-            onMousemove={handleMouseMove}
-            onMouseup={handleMouseUp}
-            style={{ background: '#fff', borderRadius: '8px' }}
-          >
-            <Layer>
-              {lines.map((line, i) => (
-                <Line key={i} points={line.points} stroke="#111" strokeWidth={3} tension={0.5} lineCap="round" lineJoin="round" />
-              ))}
-            </Layer>
-          </Stage>
+    <main className="app">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-icon">⌘</div>
+          <div>
+            <h1>SyncSpace</h1>
+            <p>Real-time collaborative workspace</p>
+          </div>
         </div>
 
-        <div style={styles.panel}>
-          <h3 style={styles.panelTitle}>Code Editor</h3>
-          <Editor
-            height="450px"
-            defaultLanguage="javascript"
-            value={code}
-            theme="vs-dark"
-            onChange={handleEditorChange}
-          />
+        <div className={`connection ${connected ? 'online' : ''}`}>
+          <span />
+          {connected ? 'Live session connected' : 'Connecting…'}
         </div>
-      </div>
-    </div>
+      </header>
+
+      <section className="hero">
+        <div>
+          <p className="eyebrow">TEAM WORKSPACE</p>
+          <h2>Build ideas together,<br />in real time.</h2>
+          <p className="hero-copy">
+            Sketch your thinking, write code, and collaborate with your team
+            from one focused workspace.
+          </p>
+        </div>
+
+        <div className="team-card">
+          <div className="avatars">
+            <span className="avatar purple">A</span>
+            <span className="avatar blue">S</span>
+            <span className="avatar green">+</span>
+          </div>
+          <div>
+            <strong>Team Sync</strong>
+            <p>Collaboration is active</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="workspace">
+        <div className="panel whiteboard-panel">
+          <div className="panel-header">
+            <div>
+              <p className="panel-label">COLLABORATIVE CANVAS</p>
+              <h3>Whiteboard</h3>
+            </div>
+            <button className="text-button" onClick={clearBoard}>
+              Clear board
+            </button>
+          </div>
+
+          <div className="canvas-wrap">
+            <Stage
+              width={520}
+              height={430}
+              onMouseDown={handleMouseDown}
+              onMousemove={handleMouseMove}
+              onMouseup={handleMouseUp}
+              onTouchStart={handleMouseDown}
+              onTouchMove={handleMouseMove}
+              onTouchEnd={handleMouseUp}
+            >
+              <Layer>
+                {lines.map((line, i) => (
+                  <Line
+                    key={i}
+                    points={line.points}
+                    stroke="#35d5e7"
+                    strokeWidth={3}
+                    tension={0.5}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
+                ))}
+              </Layer>
+            </Stage>
+            {!lines.length && (
+              <div className="canvas-hint">
+                <span>✦</span>
+                Start drawing your ideas
+              </div>
+            )}
+          </div>
+
+          <div className="panel-footer">
+            <span>✎ Draw freely on the canvas</span>
+            <span className="sync-label">● Synced live</span>
+          </div>
+        </div>
+
+        <div className="panel editor-panel">
+          <div className="panel-header">
+            <div>
+              <p className="panel-label">SHARED DEVELOPMENT</p>
+              <h3>Code editor</h3>
+            </div>
+            <span className="language-pill">JavaScript</span>
+          </div>
+
+          <div className="editor-wrap">
+            <Editor
+              height="430px"
+              defaultLanguage="javascript"
+              value={code}
+              theme="vs-dark"
+              onChange={handleEditorChange}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 14,
+                padding: { top: 18 },
+                scrollBeyondLastLine: false,
+              }}
+            />
+          </div>
+
+          <div className="panel-footer">
+            <span>⌘ S Auto-saved</span>
+            <span className="sync-label">● Live editing</span>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <span>SyncSpace</span>
+        <span>Made for better team collaboration</span>
+      </footer>
+    </main>
   );
 }
-
-const styles = {
-  page: { minHeight: '100vh', background: '#0f172a', color: '#f1f5f9', fontFamily: 'system-ui, sans-serif', padding: '40px 30px' },
-  header: { display: 'flex', alignItems: 'center', gap: '20px', maxWidth: '900px', margin: '0 auto' },
-  title: { fontSize: '32px', margin: 0, fontWeight: 700 },
-  status: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#94a3b8' },
-  dot: { width: '8px', height: '8px', borderRadius: '50%' },
-  subtitle: { maxWidth: '900px', margin: '10px auto 20px', color: '#94a3b8' },
-  splitView: { display: 'flex', gap: '20px', maxWidth: '900px', margin: '0 auto', flexWrap: 'wrap' },
-  panel: { flex: 1, minWidth: '400px' },
-  panelTitle: { fontSize: '14px', color: '#94a3b8', marginBottom: '10px' },
-};
 
 export default App;
