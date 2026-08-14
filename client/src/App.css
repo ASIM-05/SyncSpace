@@ -27,10 +27,77 @@ body {
 
 .topbar,
 .hero,
+.room-bar,
 .workspace,
 footer {
   max-width: 1240px;
   margin-inline: auto;
+}
+
+.room-bar {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 24px;
+  padding: 14px 18px;
+  border: 1px solid #263442;
+  border-radius: 12px;
+  background: rgba(13, 20, 29, 0.78);
+}
+
+.room-bar > div { min-width: 145px; }
+
+.room-bar strong {
+  display: block;
+  margin-top: 4px;
+  color: #dcebf3;
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+}
+
+.room-bar form {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-bar label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.room-bar input {
+  min-width: 0;
+  flex: 1;
+  padding: 9px 11px;
+  border: 1px solid #2d4050;
+  border-radius: 7px;
+  outline: none;
+  color: #e6f1f7;
+  background: #101820;
+  font: 12px 'DM Mono', monospace;
+}
+
+.room-bar input:focus { border-color: #2eddec; }
+
+.room-bar button {
+  padding: 9px 12px;
+  border: 1px solid #2eddec;
+  border-radius: 7px;
+  color: #062129;
+  background: #2eddec;
+  cursor: pointer;
+  font: 600 12px Inter, sans-serif;
+}
+
+.room-bar .copy-button {
+  border-color: #2d4050;
+  color: #a8b7c3;
+  background: transparent;
 }
 
 .topbar {
@@ -322,6 +389,14 @@ footer span:first-child {
     display: block;
     padding: 50px 0 35px;
   }
+
+  .room-bar,
+  .room-bar form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .room-bar { gap: 12px; }
 
   .hero h2 {
     letter-spacing: -2px;

@@ -7,10 +7,21 @@ import { WebsocketProvider } from 'y-websocket';
 import './App.css';
 
 const socket = io('http://localhost:4000');
+const DEFAULT_CODE = '// Welcome to SyncSpace \u{1F680}\n// Write code here and collaborate live.\n\nfunction helloTeam() {\n  return "Building together!";\n}';
+
+const makeRoomId = () => `room-${Math.random().toString(36).slice(2, 8)}`;
+
+const getInitialRoomId = () => {
+  const room = new URLSearchParams(window.location.search).get('room');
+  return room && /^[a-z0-9-]{3,64}$/i.test(room) ? room.toLowerCase() : makeRoomId();
+};
 
 function App() {
   const [lines, setLines] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [roomId, setRoomId] = useState(getInitialRoomId);
+  const [roomInput, setRoomInput] = useState(roomId);
+  const [copyLabel, setCopyLabel] = useState('Copy link');
   const [code, setCode] = useState(
     '// Welcome to SyncSpace 🚀\n// Write code here and collaborate live.\n\nfunction helloTeam() {\n  return "Building together!";\n}'
   );
@@ -21,7 +32,16 @@ function App() {
   const isRemoteChange = useRef(false);
 
   useEffect(() => {
-    socket.on('connect', () => setConnected(true));
+    const roomUrl = new URL(window.location.href);
+    roomUrl.searchParams.set('room', roomId);
+    window.history.replaceState({}, '', roomUrl);
+
+    const joinRoom = () => {
+      setConnected(true);
+      socket.emit('join-room', roomId);
+    };
+
+    socket.on('connect', joinRoom);
     socket.on('disconnect', () => setConnected(false));
 
     socket.on('draw-history', (history) => {
@@ -37,25 +57,32 @@ function App() {
       });
     });
 
+    socket.on('board-cleared', () => {
+      setLines([]);
+      linesRef.current = [];
+    });
+
+    if (socket.connected) joinRoom();
+
     const ydoc = new Y.Doc();
     const provider = new WebsocketProvider(
       'ws://localhost:1234',
-      'syncspace-room',
+      `syncspace-${roomId}`,
       ydoc
     );
 
     const ytext = ydoc.getText('monaco');
     ytextRef.current = ytext;
 
-    if (ytext.toString() === '') {
-      ytext.insert(0, code);
-    } else {
-      setCode(ytext.toString());
-    }
-
     ytext.observe(() => {
       isRemoteChange.current = true;
       setCode(ytext.toString());
+    });
+
+    provider.on('sync', (isSynced) => {
+      if (!isSynced) return;
+      if (ytext.length === 0) ytext.insert(0, DEFAULT_CODE);
+      else setCode(ytext.toString());
     });
 
     return () => {
@@ -63,10 +90,11 @@ function App() {
       socket.off('disconnect');
       socket.off('draw-history');
       socket.off('draw-line');
+      socket.off('board-cleared');
       provider.destroy();
       ydoc.destroy();
     };
-  }, []);
+  }, [roomId]);
 
   const updateLines = (updater) => {
     setLines((prev) => {
@@ -120,6 +148,19 @@ function App() {
   const clearBoard = () => {
     setLines([]);
     linesRef.current = [];
+    socket.emit('clear-board');
+  };
+
+  const joinRoom = (event) => {
+    event.preventDefault();
+    const nextRoom = roomInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    if (nextRoom.length >= 3 && nextRoom.length <= 64) setRoomId(nextRoom);
+  };
+
+  const copyRoomLink = async () => {
+    await navigator.clipboard?.writeText(window.location.href);
+    setCopyLabel('Copied!');
+    window.setTimeout(() => setCopyLabel('Copy link'), 1800);
   };
 
   return (
@@ -139,6 +180,24 @@ function App() {
         </div>
       </header>
 
+      <section className="room-bar" aria-label="Room controls">
+        <div>
+          <p className="panel-label">CURRENT ROOM</p>
+          <strong>{roomId}</strong>
+        </div>
+        <form onSubmit={joinRoom}>
+          <label htmlFor="room-id">Join or create room</label>
+          <input
+            id="room-id"
+            value={roomInput}
+            onChange={(event) => setRoomInput(event.target.value)}
+            placeholder="e.g. design-sprint"
+          />
+          <button type="submit">Enter room</button>
+        </form>
+        <button className="copy-button" type="button" onClick={copyRoomLink}>{copyLabel}</button>
+      </section>
+
       <section className="hero">
         <div>
           <p className="eyebrow">TEAM WORKSPACE</p>
@@ -156,8 +215,8 @@ function App() {
             <span className="avatar green">+</span>
           </div>
           <div>
-            <strong>Team Sync</strong>
-            <p>Collaboration is active</p>
+            <strong>{roomId}</strong>
+            <p>Share this room with your team</p>
           </div>
         </div>
       </section>
