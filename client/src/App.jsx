@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Stage, Layer, Line, Rect, Circle, Arrow } from 'react-konva';
+import { Stage, Layer, Line, Rect, Circle, Arrow, Group, Text } from 'react-konva';
 import Editor from '@monaco-editor/react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import { supabase } from './supabase';
 import './App.css';
 
 const socket = io('http://localhost:4000');
@@ -63,11 +64,110 @@ function App() {
 
   // Connected Users
   const [usersList, setUsersList] = useState([]);
+  const [whiteboardCursors, setWhiteboardCursors] = useState({});
+
+  // Auth State
+  const [user, setUser] = useState(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
+  const [authError, setAuthError] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
 
   // Scroll to bottom of chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
+
+  // Supabase Auth listener
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        const name = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
+        setUsername(name);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        const name = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
+        setUsername(name);
+      } else {
+        setUser(null);
+        setUsername('');
+      }
+    });
+
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthLoading(true);
+
+    if (!supabase) {
+      if (authEmail) {
+        const mockUser = {
+          id: 'mock-' + Math.random().toString(36).slice(2, 9),
+          email: authEmail,
+          user_metadata: { full_name: authEmail.split('@')[0] }
+        };
+        setUser(mockUser);
+        setUsername(mockUser.user_metadata.full_name);
+        setShowAuthModal(false);
+        setAuthLoading(false);
+        alert('🟢 Logged in successfully (Mock Dev Mode)');
+      }
+      return;
+    }
+
+    try {
+      if (authMode === 'signup') {
+        const { error } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+          options: {
+            data: { full_name: authEmail.split('@')[0] }
+          }
+        });
+        if (error) throw error;
+        alert('🚀 Signup successful! You can now Sign In.');
+        setAuthMode('login');
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword
+        });
+        if (error) throw error;
+        if (data.user) {
+          setUser(data.user);
+          const name = data.user.user_metadata?.full_name || data.user.email.split('@')[0];
+          setUsername(name);
+          setShowAuthModal(false);
+        }
+      }
+    } catch (err) {
+      setAuthError(err.message || 'Authentication error');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setUser(null);
+    setUsername('');
+    alert('Logged out successfully.');
+  };
 
   // Session Timer counter
   useEffect(() => {
@@ -132,6 +232,18 @@ function App() {
       setChatMessages((prev) => [...prev, msg]);
     });
 
+    socket.on('whiteboard-cursor', ({ username, x, y, active }) => {
+      setWhiteboardCursors((prev) => {
+        const next = { ...prev };
+        if (active) {
+          next[username] = { x, y };
+        } else {
+          delete next[username];
+        }
+        return next;
+      });
+    });
+
     if (socket.connected) joinRoom();
 
     // Collaborative Yjs editor provider setup
@@ -168,6 +280,8 @@ function App() {
       socket.off('users-list');
       socket.off('notes-history');
       socket.off('receive-message');
+      socket.off('whiteboard-cursor');
+      setWhiteboardCursors({});
       provider.destroy();
       ydoc.destroy();
     };
@@ -307,8 +421,15 @@ function App() {
   };
 
   const handleMouseMove = (e) => {
+    // Sync pointer position for cursor tracking
+    const stage = e.target.getStage();
+    const pos = stage.getPointerPosition();
+    if (pos) {
+      socket.emit('whiteboard-cursor', { x: pos.x, y: pos.y, active: true });
+    }
+
     if (!isDrawing.current) return;
-    const pos = e.target.getStage().getPointerPosition();
+    if (!pos) return;
 
     updateLines((prev) => {
       const last = prev[prev.length - 1];
@@ -336,6 +457,10 @@ function App() {
     if (lastShape) {
       socket.emit('draw-line', lastShape);
     }
+  };
+
+  const handleMouseLeave = () => {
+    socket.emit('whiteboard-cursor', { active: false });
   };
 
   const handleClearBoard = () => {
@@ -405,6 +530,28 @@ function App() {
   if (!isJoined) {
     return (
       <main className="landing-app">
+        {/* Floating User Auth Banner */}
+        <div className="landing-auth-bar">
+          {user ? (
+            <div className="auth-profile">
+              <span className="auth-user-email">👤 {user.email}</span>
+              <button className="btn-signout" onClick={handleSignOut}>
+                🚪 Sign Out
+              </button>
+            </div>
+          ) : (
+            <button
+              className="btn-signin"
+              onClick={() => {
+                setAuthError(null);
+                setShowAuthModal(true);
+              }}
+            >
+              👤 Sign In / Sign Up
+            </button>
+          )}
+        </div>
+
         <div className="landing-container">
           <div className="landing-hero">
             <div className="landing-brand">
@@ -446,10 +593,14 @@ function App() {
                 <input
                   type="text"
                   required
+                  disabled={!!user}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. VEDANSH MISRA"
+                  placeholder={user ? "" : "e.g. VEDANSH MISRA"}
                 />
+                {user && (
+                  <span className="input-subtext">Signed in automatically as profile username</span>
+                )}
               </div>
 
               <div className="input-group">
@@ -496,6 +647,114 @@ function App() {
             </form>
           </div>
         </div>
+
+        {/* Beautiful Auth Pop-Up Modal */}
+        {showAuthModal && (
+          <div className="auth-modal-overlay">
+            <div className="auth-modal">
+              <button
+                className="auth-close-btn"
+                onClick={() => setShowAuthModal(false)}
+              >
+                ✕
+              </button>
+
+              <div className="auth-header">
+                <h2>{authMode === 'login' ? '👤 Sign In' : '🚀 Create Account'}</h2>
+                <p>Register or log in to start collaborating in SyncSpace</p>
+              </div>
+
+              {!supabase && (
+                <div className="auth-warning-banner">
+                  <span>⚠️ Dev Mode: Supabase credentials not found. Using Mock Auth.</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAuthSubmit} className="auth-form-body">
+                {authError && <div className="auth-error-message">{authError}</div>}
+
+                <div className="input-group">
+                  <label>Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+
+                <div className="input-group">
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    required={!!supabase}
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Minimum 6 characters..."
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-auth-submit"
+                  disabled={authLoading}
+                >
+                  {authLoading ? 'Signing in...' : authMode === 'login' ? 'Sign In' : 'Sign Up'}
+                </button>
+
+                <div className="auth-modal-footer">
+                  {authMode === 'login' ? (
+                    <p>
+                      Don't have an account?{' '}
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => setAuthMode('signup')}
+                      >
+                        Sign Up
+                      </button>
+                    </p>
+                  ) : (
+                    <p>
+                      Already have an account?{' '}
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => setAuthMode('login')}
+                      >
+                        Sign In
+                      </button>
+                    </p>
+                  )}
+
+                  {!supabase && (
+                    <button
+                      type="button"
+                      className="btn-mock-guest"
+                      onClick={() => {
+                        const guestMail = `guest-${Math.random().toString(36).slice(2, 6)}@syncspace.local`;
+                        setAuthEmail(guestMail);
+                        
+                        // Fake direct mock user login
+                        const mockUser = {
+                          id: 'mock-' + Math.random().toString(36).slice(2, 9),
+                          email: guestMail,
+                          user_metadata: { full_name: guestMail.split('@')[0] }
+                        };
+                        setUser(mockUser);
+                        setUsername(mockUser.user_metadata.full_name);
+                        setShowAuthModal(false);
+                      }}
+                    >
+                      ⚡ Quick Mock Guest Login
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
     );
   }
@@ -829,11 +1088,12 @@ function App() {
 
           <div className="canvas-container">
             <Stage
-              width={450}
-              height={300}
+              width={550}
+              height={450}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
               onTouchStart={handleMouseDown}
               onTouchMove={handleMouseMove}
               onTouchEnd={handleMouseUp}
@@ -895,6 +1155,29 @@ function App() {
                     );
                   }
                 })}
+
+                {/* Render remote collaborator cursors */}
+                {Object.entries(whiteboardCursors).map(([uname, pos]) => (
+                  <Group key={uname} x={pos.x} y={pos.y}>
+                    <Circle radius={4} fill="#a855f7" stroke="white" strokeWidth={1} />
+                    <Rect
+                      x={6}
+                      y={-12}
+                      width={uname.length * 6 + 12}
+                      height={16}
+                      fill="#a855f7"
+                      cornerRadius={4}
+                    />
+                    <Text
+                      x={10}
+                      y={-9}
+                      text={uname}
+                      fontSize={9}
+                      fill="white"
+                      fontStyle="bold"
+                    />
+                  </Group>
+                ))}
               </Layer>
             </Stage>
             {lines.length === 0 && (

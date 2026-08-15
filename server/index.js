@@ -137,6 +137,17 @@ io.on('connection', (socket) => {
     socket.to(room).emit('receive-message', msg);
   });
 
+  socket.on('whiteboard-cursor', (data) => {
+    const room = socket.data.room;
+    if (!room) return;
+    socket.to(room).emit('whiteboard-cursor', {
+      username: socket.data.username || 'Anonymous',
+      x: data.x,
+      y: data.y,
+      active: data.active
+    });
+  });
+
   socket.on('disconnect', () => {
     console.log('user disconnected:', socket.id);
     const room = socket.data.room;
