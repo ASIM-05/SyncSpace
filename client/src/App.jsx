@@ -7,7 +7,11 @@ import { WebsocketProvider } from 'y-websocket';
 import { supabase } from './supabase';
 import './App.css';
 
-const socket = io('http://localhost:4000');
+const socket = io(
+  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:4000'
+    : import.meta.env.VITE_BACKEND_URL || 'https://syncspace-backend.onrender.com'
+);
 const DEFAULT_CODE = `// Welcome to SyncSpace 🚀
 // Write code here and collaborate live.
 

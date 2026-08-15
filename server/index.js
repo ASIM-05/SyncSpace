@@ -158,7 +158,8 @@ io.on('connection', (socket) => {
 });
 
 if (require.main === module) {
-  server.listen(4000, () => console.log('server running on 4000'));
+  const port = process.env.PORT || 4000;
+  server.listen(port, () => console.log('server running on ' + port));
 }
 
 module.exports = { normalizeRoomId, isPoint, roomFromDoc };
