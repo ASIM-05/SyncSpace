@@ -9,30 +9,75 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 const roomHistories = new Map();
+const roomNotes = new Map();
 
 const normalizeRoomId = (roomId) =>
   typeof roomId === 'string' && /^[a-z0-9-]{3,64}$/i.test(roomId)
     ? roomId.toLowerCase()
     : null;
 
+const isPoint = (pts) =>
+  Array.isArray(pts) &&
+  pts.length === 2 &&
+  Number.isFinite(pts[0]) &&
+  Number.isFinite(pts[1]);
+
+const roomFromDoc = (docName) => {
+  if (typeof docName !== 'string') return null;
+  const match = docName.match(/^syncspace-([a-z0-9-]{3,64})$/i);
+  return match ? match[1].toLowerCase() : null;
+};
+
+const updateUsersInRoom = async (room) => {
+  if (!room) return;
+  try {
+    const sockets = await io.in(room).fetchSockets();
+    const users = sockets.map((s) => ({
+      id: s.id,
+      username: s.data.username || 'Anonymous',
+    }));
+    io.to(room).emit('users-list', users);
+  } catch (err) {
+    console.error('Error fetching sockets in room:', err);
+  }
+};
+
 io.on('connection', (socket) => {
   console.log('user connected:', socket.id);
 
-  socket.on('join-room', (roomId, callback) => {
-    const room = normalizeRoomId(roomId);
+  socket.on('join-room', (data, callback) => {
+    let roomId, username;
+    if (typeof data === 'object' && data !== null) {
+      roomId = data.roomId;
+      username = data.username;
+    } else {
+      roomId = data;
+      username = 'Anonymous';
+    }
 
+    const room = normalizeRoomId(roomId);
     if (!room) {
       callback?.({ ok: false, error: 'Invalid room ID.' });
       return;
     }
 
     const previousRoom = socket.data.room;
-    if (previousRoom) socket.leave(previousRoom);
+    if (previousRoom) {
+      socket.leave(previousRoom);
+      updateUsersInRoom(previousRoom);
+    }
 
     socket.join(room);
     socket.data.room = room;
+    socket.data.username = username || 'Anonymous';
+
     const history = roomHistories.get(room) || [];
     socket.emit('draw-history', history);
+
+    const notes = roomNotes.get(room) || [];
+    socket.emit('notes-history', notes);
+
+    updateUsersInRoom(room);
     callback?.({ ok: true, room });
   });
 
@@ -59,7 +104,50 @@ io.on('connection', (socket) => {
     io.to(room).emit('board-cleared');
   });
 
-  socket.on('disconnect', () => console.log('user disconnected'));
+  socket.on('add-note', (note) => {
+    const room = socket.data.room;
+    if (!room) return;
+    const notes = roomNotes.get(room) || [];
+    notes.push(note);
+    roomNotes.set(room, notes);
+    io.to(room).emit('notes-history', notes);
+  });
+
+  socket.on('edit-note', (updatedNote) => {
+    const room = socket.data.room;
+    if (!room) return;
+    let notes = roomNotes.get(room) || [];
+    notes = notes.map((n) => (n.id === updatedNote.id ? { ...n, ...updatedNote } : n));
+    roomNotes.set(room, notes);
+    io.to(room).emit('notes-history', notes);
+  });
+
+  socket.on('delete-note', (noteId) => {
+    const room = socket.data.room;
+    if (!room) return;
+    let notes = roomNotes.get(room) || [];
+    notes = notes.filter((n) => n.id !== noteId);
+    roomNotes.set(room, notes);
+    io.to(room).emit('notes-history', notes);
+  });
+
+  socket.on('send-message', (msg) => {
+    const room = socket.data.room;
+    if (!room) return;
+    socket.to(room).emit('receive-message', msg);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('user disconnected:', socket.id);
+    const room = socket.data.room;
+    if (room) {
+      updateUsersInRoom(room);
+    }
+  });
 });
 
-server.listen(4000, () => console.log('server running on 4000'));
+if (require.main === module) {
+  server.listen(4000, () => console.log('server running on 4000'));
+}
+
+module.exports = { normalizeRoomId, isPoint, roomFromDoc };
